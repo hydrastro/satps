@@ -29,14 +29,7 @@ typedef struct sat {
   int clauses_size;
 } sat_t;
 
-bool satDPLL(sat_t *sat, int *assignments, int variables_count);
-bool isSatisfied(const sat_t *sat, const int *assignments, int variables_count);
-void unitPropagation(sat_t *sat, int *assignments, int variables_count);
-bool pureLiteralElimination(sat_t *sat, int *assignments, int variables_count);
-int chooseUnassignedVariable(const int *assignments, int variables_count);
-void freeSAT(sat_t *sat);
-
-sat_t *generateSAT(int k, int variables_count, int clauses_count) {
+sat_t *generate_sat(int k, int variables_count, int clauses_count) {
   int i, j;
   sat_t *sat = (sat_t *)malloc(sizeof(sat_t));
   sat->clauses_size = clauses_count;
@@ -58,7 +51,7 @@ sat_t *generateSAT(int k, int variables_count, int clauses_count) {
   return sat;
 }
 
-void printSAT(const sat_t *sat) {
+void print_sat(const sat_t *sat) {
   int i, j;
   printf("%d-SAT: ", sat->clauses_size);
   for (i = 0; i < sat->clauses_size; i++) {
@@ -79,7 +72,7 @@ void printSAT(const sat_t *sat) {
   printf("\n");
 }
 
-void freeSAT(sat_t *sat) {
+void free_sat(sat_t *sat) {
   int i;
   for (i = 0; i < sat->clauses_size; i++) {
     free(sat->clauses[i].literals);
@@ -88,38 +81,8 @@ void freeSAT(sat_t *sat) {
   free(sat);
 }
 
-bool satDPLL(sat_t *sat, int *assignments, int variables_count) {
-  if (isSatisfied(sat, assignments, variables_count)) {
-    return true;
-  }
-
-  unitPropagation(sat, assignments, variables_count);
-
-  if (pureLiteralElimination(sat, assignments, variables_count)) {
-    return satDPLL(sat, assignments, variables_count);
-  }
-
-  int variable = chooseUnassignedVariable(assignments, variables_count);
-  if (variable == -1) {
-    return false;
-  }
-
-  assignments[variable - 1] = 1;
-  if (satDPLL(sat, assignments, variables_count)) {
-    return true;
-  }
-
-  assignments[variable - 1] = 0;
-  if (satDPLL(sat, assignments, variables_count)) {
-    return true;
-  }
-
-  assignments[variable - 1] = -1;
-  return false;
-}
-
-bool isSatisfied(const sat_t *sat, const int *assignments,
-                 int variables_count) {
+bool is_satisfied(const sat_t *sat, const int *assignments,
+                  int variables_count) {
   int i, j, value;
   bool clause_satisfied;
   for (i = 0; i < sat->clauses_size; i++) {
@@ -138,8 +101,7 @@ bool isSatisfied(const sat_t *sat, const int *assignments,
   }
   return true;
 }
-
-void unitPropagation(sat_t *sat, int *assignments, int variables_count) {
+void unit_propagation(sat_t *sat, int *assignments, int variables_count) {
   int i, j, unassigned_count, value;
   bool changed, clause_satisfied;
   do {
@@ -179,7 +141,8 @@ void unitPropagation(sat_t *sat, int *assignments, int variables_count) {
   } while (changed);
 }
 
-bool pureLiteralElimination(sat_t *sat, int *assignments, int variables_count) {
+bool pure_literal_elimination(sat_t *sat, int *assignments,
+                              int variables_count) {
   int i, j, index;
   bool changed = false;
   int literal_counts[variables_count * 2];
@@ -210,7 +173,7 @@ bool pureLiteralElimination(sat_t *sat, int *assignments, int variables_count) {
   return changed;
 }
 
-int chooseUnassignedVariable(const int *assignments, int variables_count) {
+int choose_unassigned_var(const int *assignments, int variables_count) {
   int i;
   for (i = 0; i < variables_count; i++) {
     if (assignments[i] == -1) {
@@ -218,6 +181,36 @@ int chooseUnassignedVariable(const int *assignments, int variables_count) {
     }
   }
   return -1;
+}
+
+bool sat_dpll(sat_t *sat, int *assignments, int variables_count) {
+  if (is_satisfied(sat, assignments, variables_count)) {
+    return true;
+  }
+
+  unit_propagation(sat, assignments, variables_count);
+
+  if (pure_literal_elimination(sat, assignments, variables_count)) {
+    return sat_dpll(sat, assignments, variables_count);
+  }
+
+  int variable = choose_unassigned_var(assignments, variables_count);
+  if (variable == -1) {
+    return false;
+  }
+
+  assignments[variable - 1] = 1;
+  if (sat_dpll(sat, assignments, variables_count)) {
+    return true;
+  }
+
+  assignments[variable - 1] = 0;
+  if (sat_dpll(sat, assignments, variables_count)) {
+    return true;
+  }
+
+  assignments[variable - 1] = -1;
+  return false;
 }
 
 void plotResults(double *alphas, double *satisfiable, double *complexity,
@@ -317,14 +310,14 @@ int main() {
     double total_time = 0.0;
 
     for (i = 0; i < NUM_INSTANCES; i++) {
-      sat_t *sat = generateSAT(SAT_K, VARIABLES_COUNT, clauses_count);
+      sat_t *sat = generate_sat(SAT_K, VARIABLES_COUNT, clauses_count);
 
       for (j = 0; j < VARIABLES_COUNT; j++) {
         assignments[j] = -1;
       }
 
       clock_t start = clock();
-      bool result = satDPLL(sat, assignments, VARIABLES_COUNT);
+      bool result = sat_dpll(sat, assignments, VARIABLES_COUNT);
       clock_t end = clock();
       total_time += (double)(end - start) / CLOCKS_PER_SEC;
 
@@ -332,7 +325,7 @@ int main() {
         sat_count++;
       }
 
-      freeSAT(sat);
+      free_sat(sat);
     }
 
     satisfiable[step] = (double)sat_count / NUM_INSTANCES * 100.0;
