@@ -1,304 +1,286 @@
-#include <X11/Xlib.h>
-#include <X11/Xos.h>
-#include <X11/Xutil.h>
+#include <GL/glut.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-#define NUM_INSTANCES 50
-#define VARIABLES_COUNT 70
-#define ALPHA_STEPS 40
-#define MAX_CLAUSES 400
-#define TIME_SCALE 10
+#define VARIABLES_COUNT 50
 #define SAT_K 3
+#define MAX_CLAUSES 500
+#define ALPHA_STEPS 50
+#define NUM_INSTANCES 10
+
+double alphas[ALPHA_STEPS];
+double satisfiable[ALPHA_STEPS];
+double complexity[ALPHA_STEPS];
+double max_complexity = 0.0;
+
+typedef int sat_literal_value_t;
+typedef bool sat_literal_sign_t;
 
 typedef struct sat_literal {
-  bool sign;
-  int value;
+  sat_literal_sign_t sign;
+  sat_literal_value_t value;
 } sat_literal_t;
 
 typedef struct sat_clause {
   sat_literal_t *literals;
-  int size;
+  int literals_count;
 } sat_clause_t;
 
 typedef struct sat {
   sat_clause_t *clauses;
-  int clauses_size;
+  int clauses_count;
+  int variables_count;
 } sat_t;
 
-sat_t *generate_sat(int k, int variables_count, int clauses_count) {
+sat_t *generate_k_sat(int k, int variables_count, int clauses_count) {
   int i, j;
-  sat_t *sat = (sat_t *)malloc(sizeof(sat_t));
-  sat->clauses_size = clauses_count;
-  sat->clauses = (sat_clause_t *)malloc(clauses_count * sizeof(sat_clause_t));
-
-  srand(time(NULL));
-
+  sat_t *formula = (sat_t *)malloc(sizeof(sat_t));
+  formula->clauses =
+      (sat_clause_t *)malloc(clauses_count * sizeof(sat_clause_t));
+  formula->clauses_count = clauses_count;
+  formula->variables_count = variables_count;
   for (i = 0; i < clauses_count; i++) {
-    sat_clause_t *clause = &sat->clauses[i];
-    clause->size = k;
-    clause->literals = (sat_literal_t *)malloc(k * sizeof(sat_literal_t));
-
+    formula->clauses[i].literals_count = k;
+    formula->clauses[i].literals =
+        (sat_literal_t *)malloc(k * sizeof(sat_literal_t));
     for (j = 0; j < k; j++) {
-      clause->literals[j].value = (rand() % variables_count) + 1;
-      clause->literals[j].sign = rand() % 2;
+      formula->clauses[i].literals[j].value = rand() % variables_count;
+      formula->clauses[i].literals[j].sign = rand() % 2;
     }
   }
-
-  return sat;
+  return formula;
 }
 
-void print_sat(const sat_t *sat) {
+sat_t *duplicate(sat_t *formula) {
   int i, j;
-  printf("%d-SAT: ", sat->clauses_size);
-  for (i = 0; i < sat->clauses_size; i++) {
+  sat_t *copy = (sat_t *)malloc(sizeof(sat_t));
+  copy->clauses =
+      (sat_clause_t *)malloc(formula->clauses_count * sizeof(sat_clause_t));
+  copy->clauses_count = formula->clauses_count;
+  copy->variables_count = formula->variables_count;
+  for (i = 0; i < formula->clauses_count; i++) {
+    copy->clauses[i].literals_count = formula->clauses[i].literals_count;
+    copy->clauses[i].literals = (sat_literal_t *)malloc(
+        copy->clauses[i].literals_count * sizeof(sat_literal_t));
+    for (j = 0; j < copy->clauses[i].literals_count; j++) {
+      copy->clauses[i].literals[j].value =
+          formula->clauses[i].literals[j].value;
+      copy->clauses[i].literals[j].sign = formula->clauses[i].literals[j].sign;
+    }
+  }
+  return copy;
+}
+
+void destroy_sat(sat_t *formula) {
+  int i;
+  for (i = 0; i < formula->clauses_count; i++) {
+    free(formula->clauses[i].literals);
+  }
+  free(formula->clauses);
+  free(formula);
+}
+
+void print_formula(sat_t *formula) {
+  int i, j;
+  for (i = 0; i < formula->clauses_count; i++) {
     printf("(");
-    const sat_clause_t *clause = &sat->clauses[i];
-    for (j = 0; j < clause->size; j++) {
-      const sat_literal_t *literal = &clause->literals[j];
-      printf("%s%d", literal->sign ? "" : "-", literal->value);
-      if (j < sat->clauses_size - 1) {
-        printf("V");
-      }
+    for (int j = 0; j < formula->clauses[i].literals_count; j++) {
+      if (!formula->clauses[i].literals[j].sign)
+        printf("¬");
+      printf("%d", formula->clauses[i].literals[j].value + 1);
+      if (j < formula->clauses[i].literals_count - 1)
+        printf(" ∨ ");
     }
     printf(")");
-    if (i < sat->clauses_size - 1) {
+    if (i < formula->clauses_count - 1) {
       printf("^");
+      fflush(stdout);
     }
   }
   printf("\n");
 }
 
-void free_sat(sat_t *sat) {
+sat_clause_t *get_unit_clause(sat_t *formula) {
   int i;
-  for (i = 0; i < sat->clauses_size; i++) {
-    free(sat->clauses[i].literals);
+  for (i = 0; i < formula->clauses_count; i++) {
+    if (formula->clauses[i].literals_count == 1) {
+      return &formula->clauses[i];
+    }
   }
-  free(sat->clauses);
-  free(sat);
+  return NULL;
 }
 
-bool is_satisfied(const sat_t *sat, const int *assignments,
-                  int variables_count) {
-  int i, j, value;
-  bool clause_satisfied;
-  for (i = 0; i < sat->clauses_size; i++) {
-    clause_satisfied = false;
-    for (j = 0; j < sat->clauses[i].size; j++) {
-      sat_literal_t literal = sat->clauses[i].literals[j];
-      value = assignments[literal.value - 1];
-      if ((value == 1 && literal.sign) || (value == 0 && !literal.sign)) {
-        clause_satisfied = true;
-        break;
-      }
-    }
-    if (!clause_satisfied) {
-      return false;
+bool clause_contains(sat_clause_t *clause, sat_literal_value_t value,
+                     sat_literal_sign_t sign) {
+  for (int i = 0; i < clause->literals_count; i++) {
+    if (clause->literals[i].value == value &&
+        clause->literals[i].sign == sign) {
+      return true;
     }
   }
-  return true;
-}
-void unit_propagation(sat_t *sat, int *assignments, int variables_count) {
-  int i, j, unassigned_count, value;
-  bool changed, clause_satisfied;
-  do {
-    changed = false;
-    for (i = 0; i < sat->clauses_size; i++) {
-      sat_clause_t *clause = &sat->clauses[i];
-      unassigned_count = 0;
-      clause_satisfied = false;
-
-      for (j = 0; j < clause->size; j++) {
-        sat_literal_t literal = clause->literals[j];
-        value = assignments[literal.value - 1];
-        if ((value == 1 && literal.sign) || (value == 0 && !literal.sign)) {
-          clause_satisfied = true;
-          break;
-        }
-        if (value == -1) {
-          unassigned_count++;
-        }
-      }
-
-      if (clause_satisfied) {
-        continue;
-      }
-
-      if (unassigned_count == 1) {
-        for (j = 0; j < clause->size; j++) {
-          sat_literal_t literal = clause->literals[j];
-          if (assignments[literal.value - 1] == -1) {
-            assignments[literal.value - 1] = literal.sign ? 1 : 0;
-            changed = true;
-            break;
-          }
-        }
-      }
-    }
-  } while (changed);
-}
-
-bool pure_literal_elimination(sat_t *sat, int *assignments,
-                              int variables_count) {
-  int i, j, index;
-  bool changed = false;
-  int literal_counts[variables_count * 2];
-  memset(literal_counts, 0, sizeof(literal_counts));
-
-  for (i = 0; i < sat->clauses_size; i++) {
-    for (j = 0; j < sat->clauses[i].size; j++) {
-      sat_literal_t literal = sat->clauses[i].literals[j];
-      index = literal.sign ? literal.value - 1
-                           : variables_count + literal.value - 1;
-      literal_counts[index]++;
-    }
-  }
-
-  for (i = 0; i < variables_count; i++) {
-    if (assignments[i] == -1) {
-      if (literal_counts[i] > 0 && literal_counts[variables_count + i] == 0) {
-        assignments[i] = 1;
-        changed = true;
-      } else if (literal_counts[i] == 0 &&
-                 literal_counts[variables_count + i] > 0) {
-        assignments[i] = 0;
-        changed = true;
-      }
-    }
-  }
-
-  return changed;
-}
-
-int choose_unassigned_var(const int *assignments, int variables_count) {
-  int i;
-  for (i = 0; i < variables_count; i++) {
-    if (assignments[i] == -1) {
-      return i + 1;
-    }
-  }
-  return -1;
-}
-
-bool sat_dpll(sat_t *sat, int *assignments, int variables_count) {
-  if (is_satisfied(sat, assignments, variables_count)) {
-    return true;
-  }
-
-  unit_propagation(sat, assignments, variables_count);
-
-  if (pure_literal_elimination(sat, assignments, variables_count)) {
-    return sat_dpll(sat, assignments, variables_count);
-  }
-
-  int variable = choose_unassigned_var(assignments, variables_count);
-  if (variable == -1) {
-    return false;
-  }
-
-  assignments[variable - 1] = 1;
-  if (sat_dpll(sat, assignments, variables_count)) {
-    return true;
-  }
-
-  assignments[variable - 1] = 0;
-  if (sat_dpll(sat, assignments, variables_count)) {
-    return true;
-  }
-
-  assignments[variable - 1] = -1;
   return false;
 }
 
-void plotResults(double *alphas, double *satisfiable, double *complexity,
-                 int steps) {
-  Display *display;
-  Window window;
-  int screen;
-  GC gc;
-  XEvent event;
-  bool running = true;
-  int width, height, margin, graph_width, graph_height, x1, x2, y1, y2, i;
-
-  display = XOpenDisplay(NULL);
-  if (display == NULL) {
-    fprintf(stderr, "Unable to open X display\n");
-    exit(1);
+void remove_literal(sat_clause_t *clause, sat_literal_value_t value) {
+  int new_count = 0;
+  for (int i = 0; i < clause->literals_count; i++) {
+    if (clause->literals[i].value != value) {
+      clause->literals[new_count++] = clause->literals[i];
+    }
   }
+  clause->literals_count = new_count;
+}
 
-  screen = DefaultScreen(display);
-  width = 800;
-  height = 600;
-  window = XCreateSimpleWindow(display, RootWindow(display, screen), 10, 10,
-                               width, height, 1, BlackPixel(display, screen),
-                               WhitePixel(display, screen));
-  XSelectInput(display, window, ExposureMask | KeyPressMask);
-  XMapWindow(display, window);
-  gc = XCreateGC(display, window, 0, NULL);
+void remove_clause(sat_t *formula, int clause_index) {
+  free(formula->clauses[clause_index].literals);
+  for (int i = clause_index; i < formula->clauses_count - 1; i++) {
+    formula->clauses[i] = formula->clauses[i + 1];
+  }
+  formula->clauses_count--;
+}
 
-  while (running) {
-    XNextEvent(display, &event);
+void add_clause(sat_t *formula, sat_clause_t clause) {
+  formula->clauses = (sat_clause_t *)realloc(
+      formula->clauses, (formula->clauses_count + 1) * sizeof(sat_clause_t));
+  formula->clauses[formula->clauses_count] = clause;
+  formula->clauses_count++;
+}
 
-    if (event.type == Expose) {
-      XClearWindow(display, window);
+void add_literal(sat_clause_t *clause, sat_literal_t literal) {
+  clause->literals = (sat_literal_t *)realloc(
+      clause->literals, (clause->literals_count + 1) * sizeof(sat_literal_t));
+  clause->literals[clause->literals_count] = literal;
+  clause->literals_count++;
+}
 
-      margin = 50;
-      graph_width = width - 2 * margin;
-      graph_height = height - 2 * margin;
+void unit_propagate(sat_t *formula, sat_literal_t unit) {
+  for (int i = 0; i < formula->clauses_count;) {
+    if (clause_contains(&formula->clauses[i], unit.value, unit.sign)) {
+      remove_clause(formula, i);
+    } else {
+      remove_literal(&formula->clauses[i], unit.value);
+      i++;
+    }
+  }
+}
 
-      XDrawLine(display, window, gc, margin, height - margin,
-                margin + graph_width, height - margin);
-      XDrawLine(display, window, gc, margin, height - margin, margin, margin);
+bool is_satisfiable(sat_t *formula) {
+  if (formula->clauses_count == 0) {
+    return true;
+  }
+  for (int i = 0; i < formula->clauses_count; i++) {
+    if (formula->clauses[i].literals_count == 0) {
+      return false;
+    }
+  }
+  return false;
+}
 
-      for (i = 0; i < steps - 1; i++) {
-        x1 = margin + i * graph_width / (steps - 1);
-        x2 = margin + (i + 1) * graph_width / (steps - 1);
-        y1 = height - margin - satisfiable[i] * graph_height / 100.0;
-        y2 = height - margin - satisfiable[i + 1] * graph_height / 100.0;
+bool is_unsatisfiable(sat_t *formula) {
+  for (int i = 0; i < formula->clauses_count; i++) {
+    if (formula->clauses[i].literals_count == 0) {
+      return true;
+    }
+  }
+  return false;
+}
 
-        XSetForeground(display, gc, 0x00FF00);
-        XDrawLine(display, window, gc, x1, y1, x2, y2);
-      }
+sat_literal_t *get_pure_literal(sat_t *formula) {
+  int *sign_count = (int *)calloc(formula->variables_count, sizeof(int));
+  bool *found = (bool *)calloc(formula->variables_count, sizeof(bool));
+  sat_literal_t *pure_literal = NULL;
 
-      for (i = 0; i < steps - 1; i++) {
-        x1 = margin + i * graph_width / (steps - 1);
-        x2 = margin + (i + 1) * graph_width / (steps - 1);
-        y1 = height - margin - complexity[i] * graph_height / 2.0;
-        y2 = height - margin - complexity[i + 1] * graph_height / 2.0;
+  for (int i = 0; i < formula->clauses_count; i++) {
+    for (int j = 0; j < formula->clauses[i].literals_count; j++) {
+      sat_literal_t literal = formula->clauses[i].literals[j];
+      int idx = literal.value;
 
-        XSetForeground(display, gc, 0xFF0000);
-        XDrawLine(display, window, gc, x1, y1, x2, y2);
-      }
-
-      XSetForeground(display, gc, BlackPixel(display, screen));
-      XDrawString(display, window, gc, margin, margin - 10,
-                  "k-SAT Phase Transition", 22);
-      XDrawString(display, window, gc, margin + graph_width / 2,
-                  height - margin + 20, "Alpha (Clauses/Variables)", 26);
-      XDrawString(display, window, gc, 10, margin, "Percentage/Complexity", 22);
-    } else if (event.type == KeyPress) {
-      char key;
-      KeySym keysym;
-      XLookupString(&event.xkey, &key, 1, &keysym, NULL);
-
-      if (key == 'q' || key == 'Q') {
-        running = false;
+      if (!found[idx]) {
+        sign_count[idx] = literal.sign ? 1 : -1;
+        found[idx] = true;
+      } else if (sign_count[idx] != 0) {
+        if (sign_count[idx] > 0 && !literal.sign) {
+          sign_count[idx] = 0;
+        } else if (sign_count[idx] < 0 && literal.sign) {
+          sign_count[idx] = 0;
+        }
       }
     }
   }
 
-  XFreeGC(display, gc);
-  XDestroyWindow(display, window);
-  XCloseDisplay(display);
+  for (int i = 0; i < formula->variables_count; i++) {
+    if (sign_count[i] != 0) {
+      pure_literal = (sat_literal_t *)malloc(sizeof(sat_literal_t));
+      pure_literal->value = i;
+      pure_literal->sign = sign_count[i] > 0;
+      break;
+    }
+  }
+
+  free(sign_count);
+  free(found);
+  return pure_literal;
 }
 
-int main() {
-  double alphas[ALPHA_STEPS];
-  double satisfiable[ALPHA_STEPS];
-  double complexity[ALPHA_STEPS];
+void pure_literal_elimination(sat_t *formula, sat_literal_t literal) {
+  for (int i = 0; i < formula->clauses_count;) {
+    if (clause_contains(&formula->clauses[i], literal.value, literal.sign)) {
+      remove_clause(formula, i);
+    } else {
+      i++;
+    }
+  }
+}
+
+bool dpll(sat_t *formula) {
+  if (is_satisfiable(formula)) {
+    return true;
+  }
+  if (is_unsatisfiable(formula)) {
+    return false;
+  }
+
+  sat_clause_t *unit_clause = get_unit_clause(formula);
+  while (unit_clause) {
+    sat_literal_t unit = unit_clause->literals[0];
+    unit_propagate(formula, unit);
+    unit_clause = get_unit_clause(formula);
+  }
+
+  sat_literal_t *pure_literal = get_pure_literal(formula);
+  while (pure_literal) {
+    pure_literal_elimination(formula, *pure_literal);
+    free(pure_literal);
+    pure_literal = get_pure_literal(formula);
+  }
+
+  sat_literal_t chosen_literal;
+  for (int i = 0; i < formula->clauses_count; i++) {
+    if (formula->clauses[i].literals_count > 0) {
+      chosen_literal = formula->clauses[i].literals[0];
+      break;
+    }
+  }
+
+  sat_t *formula_copy1 = duplicate(formula);
+  sat_t *formula_copy2 = duplicate(formula);
+
+  unit_propagate(formula_copy1, chosen_literal);
+  chosen_literal.sign = !chosen_literal.sign;
+  unit_propagate(formula_copy2, chosen_literal);
+
+  bool result = dpll(formula_copy1) || dpll(formula_copy2);
+
+  destroy_sat(formula_copy1);
+  destroy_sat(formula_copy2);
+
+  return result;
+}
+
+void compute_phase_transition() {
   int step, i, j, clauses_count, sat_count;
   int assignments[VARIABLES_COUNT];
 
@@ -310,14 +292,14 @@ int main() {
     double total_time = 0.0;
 
     for (i = 0; i < NUM_INSTANCES; i++) {
-      sat_t *sat = generate_sat(SAT_K, VARIABLES_COUNT, clauses_count);
+      sat_t *sat = generate_k_sat(SAT_K, VARIABLES_COUNT, clauses_count);
 
       for (j = 0; j < VARIABLES_COUNT; j++) {
         assignments[j] = -1;
       }
 
       clock_t start = clock();
-      bool result = sat_dpll(sat, assignments, VARIABLES_COUNT);
+      bool result = dpll(sat);
       clock_t end = clock();
       total_time += (double)(end - start) / CLOCKS_PER_SEC;
 
@@ -325,14 +307,118 @@ int main() {
         sat_count++;
       }
 
-      free_sat(sat);
+      destroy_sat(sat);
     }
 
     satisfiable[step] = (double)sat_count / NUM_INSTANCES * 100.0;
-    complexity[step] = total_time / NUM_INSTANCES * TIME_SCALE;
+    complexity[step] = total_time / NUM_INSTANCES;
+
+    if (complexity[step] > max_complexity) {
+      max_complexity = complexity[step];
+    }
+
+    printf("Alpha: %f SAT: %f COMP: %f\n", alphas[step], satisfiable[step],
+           complexity[step]);
+  }
+}
+
+void draw_grid(double x_max, double y_max) {
+  glColor3f(0.3, 0.3, 0.3);
+  glBegin(GL_LINES);
+  for (double x = 0.0; x <= x_max; x += x_max / 10.0) {
+    glVertex2f(x, 0.0);
+    glVertex2f(x, y_max);
+  }
+  for (double y = 0.0; y <= y_max; y += y_max / 10.0) {
+    glVertex2f(0.0, y);
+    glVertex2f(x_max, y);
+  }
+  glEnd();
+}
+
+void draw_axis_labels(double x_max, double y_max) {
+  glColor3f(1.0, 1.0, 1.0);
+  char label[10];
+
+  for (int i = 0; i <= 10; i++) {
+    sprintf(label, "%.1f", i * x_max / 10.0);
+    glRasterPos2f(i * x_max / 10.0, -0.05 * y_max);
+    for (char *c = label; *c != '\0'; c++) {
+      glutBitmapCharacter(GLUT_BITMAP_HELVETICA_12, *c);
+    }
   }
 
-  plotResults(alphas, satisfiable, complexity, ALPHA_STEPS);
+  for (int i = 0; i <= 10; i++) {
+    sprintf(label, "%d", i * (int)(y_max / 10.0));
+    glRasterPos2f(-0.05 * x_max, i * y_max / 10.0);
+    for (char *c = label; *c != '\0'; c++) {
+      glutBitmapCharacter(GLUT_BITMAP_HELVETICA_12, *c);
+    }
+  }
+}
 
+void draw_graph(double *x_values, double *y_values, int count, double y_scale,
+                float r, float g, float b, const char *label, double x_legend,
+                double y_legend) {
+  glColor3f(r, g, b);
+  glBegin(GL_LINE_STRIP);
+  for (int i = 0; i < count; i++) {
+    glVertex2f(x_values[i], y_values[i] / y_scale);
+  }
+  glEnd();
+
+  glRasterPos2f(x_legend, y_legend);
+  for (const char *c = label; *c != '\0'; c++) {
+    glutBitmapCharacter(GLUT_BITMAP_8_BY_13, *c);
+  }
+}
+
+void render() {
+  double x_max = 10.0;
+  double y_max = 100.0;
+
+  glClear(GL_COLOR_BUFFER_BIT);
+
+  draw_grid(x_max, y_max);
+
+  glColor3f(1.0, 1.0, 1.0);
+  glBegin(GL_LINES);
+  glVertex2f(0.0, 0.0);
+  glVertex2f(x_max, 0.0);
+  glVertex2f(0.0, 0.0);
+  glVertex2f(0.0, y_max);
+  glEnd();
+
+  draw_axis_labels(x_max, y_max);
+
+  draw_graph(alphas, satisfiable, ALPHA_STEPS, 1.0, 1.0, 0.0, 0.0,
+             "Satisfiable (%)", 1.0, 95.0);
+  draw_graph(alphas, complexity, ALPHA_STEPS, max_complexity / y_max, 0.0, 1.0,
+             0.0, "Complexity (scaled)", 7.5, 10.0);
+
+  glutSwapBuffers();
+}
+
+void reshape(int w, int h) {
+  glViewport(0, 0, w, h);
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  gluOrtho2D(-0.5, 10.5, -5.0, 105.0);
+  glMatrixMode(GL_MODELVIEW);
+}
+
+int main(int argc, char **argv) {
+  compute_phase_transition();
+
+  glutInit(&argc, argv);
+  glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
+  glutInitWindowSize(800, 600);
+  glutCreateWindow("3-SAT Phase Transition");
+
+  glClearColor(0.0, 0.0, 0.0, 0.0);
+  glutDisplayFunc(render);
+  glutReshapeFunc(reshape);
+
+  glutMainLoop();
   return 0;
 }
