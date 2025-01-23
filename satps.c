@@ -8,13 +8,13 @@
 #define VARIABLES_COUNT 50
 #define SAT_K 3
 #define MAX_CLAUSES 500
-#define ALPHA_STEPS 50
-#define NUM_INSTANCES 10
+#define ALPHA_STEPS 100
+#define NUM_INSTANCES 100
 
-double alphas[ALPHA_STEPS];
-double satisfiable[ALPHA_STEPS];
-double complexity[ALPHA_STEPS];
-double max_complexity = 0.0;
+float alphas[ALPHA_STEPS];
+float satisfiable[ALPHA_STEPS];
+float complexity[ALPHA_STEPS];
+float max_complexity = 0.0;
 
 typedef int sat_literal_value_t;
 typedef bool sat_literal_sign_t;
@@ -38,14 +38,14 @@ typedef struct sat {
 sat_t *generate_k_sat(int k, int variables_count, int clauses_count) {
   int i, j;
   sat_t *formula = (sat_t *)malloc(sizeof(sat_t));
-  formula->clauses =
-      (sat_clause_t *)malloc(clauses_count * sizeof(sat_clause_t));
+  formula->clauses = (sat_clause_t *)malloc((long unsigned int)clauses_count *
+                                            sizeof(sat_clause_t));
   formula->clauses_count = clauses_count;
   formula->variables_count = variables_count;
   for (i = 0; i < clauses_count; i++) {
     formula->clauses[i].literals_count = k;
     formula->clauses[i].literals =
-        (sat_literal_t *)malloc(k * sizeof(sat_literal_t));
+        (sat_literal_t *)malloc((long unsigned int)k * sizeof(sat_literal_t));
     for (j = 0; j < k; j++) {
       formula->clauses[i].literals[j].value = rand() % variables_count;
       formula->clauses[i].literals[j].sign = rand() % 2;
@@ -57,14 +57,15 @@ sat_t *generate_k_sat(int k, int variables_count, int clauses_count) {
 sat_t *duplicate(sat_t *formula) {
   int i, j;
   sat_t *copy = (sat_t *)malloc(sizeof(sat_t));
-  copy->clauses =
-      (sat_clause_t *)malloc(formula->clauses_count * sizeof(sat_clause_t));
+  copy->clauses = (sat_clause_t *)malloc(
+      (long unsigned int)formula->clauses_count * sizeof(sat_clause_t));
   copy->clauses_count = formula->clauses_count;
   copy->variables_count = formula->variables_count;
   for (i = 0; i < formula->clauses_count; i++) {
     copy->clauses[i].literals_count = formula->clauses[i].literals_count;
     copy->clauses[i].literals = (sat_literal_t *)malloc(
-        copy->clauses[i].literals_count * sizeof(sat_literal_t));
+        (long unsigned int)copy->clauses[i].literals_count *
+        sizeof(sat_literal_t));
     for (j = 0; j < copy->clauses[i].literals_count; j++) {
       copy->clauses[i].literals[j].value =
           formula->clauses[i].literals[j].value;
@@ -87,7 +88,7 @@ void print_formula(sat_t *formula) {
   int i, j;
   for (i = 0; i < formula->clauses_count; i++) {
     printf("(");
-    for (int j = 0; j < formula->clauses[i].literals_count; j++) {
+    for (j = 0; j < formula->clauses[i].literals_count; j++) {
       if (!formula->clauses[i].literals[j].sign)
         printf("¬");
       printf("%d", formula->clauses[i].literals[j].value + 1);
@@ -115,7 +116,8 @@ sat_clause_t *get_unit_clause(sat_t *formula) {
 
 bool clause_contains(sat_clause_t *clause, sat_literal_value_t value,
                      sat_literal_sign_t sign) {
-  for (int i = 0; i < clause->literals_count; i++) {
+  int i;
+  for (i = 0; i < clause->literals_count; i++) {
     if (clause->literals[i].value == value &&
         clause->literals[i].sign == sign) {
       return true;
@@ -125,8 +127,9 @@ bool clause_contains(sat_clause_t *clause, sat_literal_value_t value,
 }
 
 void remove_literal(sat_clause_t *clause, sat_literal_value_t value) {
-  int new_count = 0;
-  for (int i = 0; i < clause->literals_count; i++) {
+  int i, new_count;
+  new_count = 0;
+  for (i = 0; i < clause->literals_count; i++) {
     if (clause->literals[i].value != value) {
       clause->literals[new_count++] = clause->literals[i];
     }
@@ -135,8 +138,9 @@ void remove_literal(sat_clause_t *clause, sat_literal_value_t value) {
 }
 
 void remove_clause(sat_t *formula, int clause_index) {
+  int i;
   free(formula->clauses[clause_index].literals);
-  for (int i = clause_index; i < formula->clauses_count - 1; i++) {
+  for (i = clause_index; i < formula->clauses_count - 1; i++) {
     formula->clauses[i] = formula->clauses[i + 1];
   }
   formula->clauses_count--;
@@ -144,20 +148,23 @@ void remove_clause(sat_t *formula, int clause_index) {
 
 void add_clause(sat_t *formula, sat_clause_t clause) {
   formula->clauses = (sat_clause_t *)realloc(
-      formula->clauses, (formula->clauses_count + 1) * sizeof(sat_clause_t));
+      formula->clauses,
+      (long unsigned int)(formula->clauses_count + 1) * sizeof(sat_clause_t));
   formula->clauses[formula->clauses_count] = clause;
   formula->clauses_count++;
 }
 
 void add_literal(sat_clause_t *clause, sat_literal_t literal) {
   clause->literals = (sat_literal_t *)realloc(
-      clause->literals, (clause->literals_count + 1) * sizeof(sat_literal_t));
+      clause->literals,
+      (long unsigned int)(clause->literals_count + 1) * sizeof(sat_literal_t));
   clause->literals[clause->literals_count] = literal;
   clause->literals_count++;
 }
 
 void unit_propagate(sat_t *formula, sat_literal_t unit) {
-  for (int i = 0; i < formula->clauses_count;) {
+  int i;
+  for (i = 0; i < formula->clauses_count;) {
     if (clause_contains(&formula->clauses[i], unit.value, unit.sign)) {
       remove_clause(formula, i);
     } else {
@@ -168,10 +175,11 @@ void unit_propagate(sat_t *formula, sat_literal_t unit) {
 }
 
 bool is_satisfiable(sat_t *formula) {
+  int i;
   if (formula->clauses_count == 0) {
     return true;
   }
-  for (int i = 0; i < formula->clauses_count; i++) {
+  for (i = 0; i < formula->clauses_count; i++) {
     if (formula->clauses[i].literals_count == 0) {
       return false;
     }
@@ -180,7 +188,8 @@ bool is_satisfiable(sat_t *formula) {
 }
 
 bool is_unsatisfiable(sat_t *formula) {
-  for (int i = 0; i < formula->clauses_count; i++) {
+  int i;
+  for (i = 0; i < formula->clauses_count; i++) {
     if (formula->clauses[i].literals_count == 0) {
       return true;
     }
@@ -189,14 +198,19 @@ bool is_unsatisfiable(sat_t *formula) {
 }
 
 sat_literal_t *get_pure_literal(sat_t *formula) {
-  int *sign_count = (int *)calloc(formula->variables_count, sizeof(int));
-  bool *found = (bool *)calloc(formula->variables_count, sizeof(bool));
+  int *sign_count, i, j, idx;
+  bool *found;
+  sat_literal_t literal;
   sat_literal_t *pure_literal = NULL;
+  sign_count =
+      (int *)calloc((long unsigned int)formula->variables_count, sizeof(int));
+  found =
+      (bool *)calloc((long unsigned int)formula->variables_count, sizeof(bool));
 
-  for (int i = 0; i < formula->clauses_count; i++) {
-    for (int j = 0; j < formula->clauses[i].literals_count; j++) {
-      sat_literal_t literal = formula->clauses[i].literals[j];
-      int idx = literal.value;
+  for (i = 0; i < formula->clauses_count; i++) {
+    for (j = 0; j < formula->clauses[i].literals_count; j++) {
+      literal = formula->clauses[i].literals[j];
+      idx = literal.value;
 
       if (!found[idx]) {
         sign_count[idx] = literal.sign ? 1 : -1;
@@ -211,7 +225,7 @@ sat_literal_t *get_pure_literal(sat_t *formula) {
     }
   }
 
-  for (int i = 0; i < formula->variables_count; i++) {
+  for (i = 0; i < formula->variables_count; i++) {
     if (sign_count[i] != 0) {
       pure_literal = (sat_literal_t *)malloc(sizeof(sat_literal_t));
       pure_literal->value = i;
@@ -226,7 +240,8 @@ sat_literal_t *get_pure_literal(sat_t *formula) {
 }
 
 void pure_literal_elimination(sat_t *formula, sat_literal_t literal) {
-  for (int i = 0; i < formula->clauses_count;) {
+  int i;
+  for (i = 0; i < formula->clauses_count;) {
     if (clause_contains(&formula->clauses[i], literal.value, literal.sign)) {
       remove_clause(formula, i);
     } else {
@@ -236,6 +251,11 @@ void pure_literal_elimination(sat_t *formula, sat_literal_t literal) {
 }
 
 bool dpll(sat_t *formula) {
+  int i;
+  bool result;
+  sat_clause_t *unit_clause;
+  sat_literal_t *pure_literal, unit, chosen_literal;
+  sat_t *formula_copy1, *formula_copy2;
   if (is_satisfiable(formula)) {
     return true;
   }
@@ -243,36 +263,35 @@ bool dpll(sat_t *formula) {
     return false;
   }
 
-  sat_clause_t *unit_clause = get_unit_clause(formula);
+  unit_clause = get_unit_clause(formula);
   while (unit_clause) {
-    sat_literal_t unit = unit_clause->literals[0];
+    unit = unit_clause->literals[0];
     unit_propagate(formula, unit);
     unit_clause = get_unit_clause(formula);
   }
 
-  sat_literal_t *pure_literal = get_pure_literal(formula);
+  pure_literal = get_pure_literal(formula);
   while (pure_literal) {
     pure_literal_elimination(formula, *pure_literal);
     free(pure_literal);
     pure_literal = get_pure_literal(formula);
   }
 
-  sat_literal_t chosen_literal;
-  for (int i = 0; i < formula->clauses_count; i++) {
+  for (i = 0; i < formula->clauses_count; i++) {
     if (formula->clauses[i].literals_count > 0) {
       chosen_literal = formula->clauses[i].literals[0];
       break;
     }
   }
 
-  sat_t *formula_copy1 = duplicate(formula);
-  sat_t *formula_copy2 = duplicate(formula);
+  formula_copy1 = duplicate(formula);
+  formula_copy2 = duplicate(formula);
 
   unit_propagate(formula_copy1, chosen_literal);
   chosen_literal.sign = !chosen_literal.sign;
   unit_propagate(formula_copy2, chosen_literal);
 
-  bool result = dpll(formula_copy1) || dpll(formula_copy2);
+  result = dpll(formula_copy1) || dpll(formula_copy2);
 
   destroy_sat(formula_copy1);
   destroy_sat(formula_copy2);
@@ -280,28 +299,36 @@ bool dpll(sat_t *formula) {
   return result;
 }
 
-void compute_phase_transition() {
+void compute_phase_transition(void) {
   int step, i, j, clauses_count, sat_count;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
   int assignments[VARIABLES_COUNT];
+#pragma GCC diagnostic pop
+  float total_time;
+  sat_t *sat;
+  clock_t start;
+  bool result;
+  clock_t end;
 
   for (step = 0; step < ALPHA_STEPS; step++) {
     clauses_count = (step + 1) * MAX_CLAUSES / ALPHA_STEPS;
-    alphas[step] = (double)clauses_count / VARIABLES_COUNT;
+    alphas[step] = (float)clauses_count / VARIABLES_COUNT;
 
     sat_count = 0;
-    double total_time = 0.0;
+    total_time = 0.0;
 
     for (i = 0; i < NUM_INSTANCES; i++) {
-      sat_t *sat = generate_k_sat(SAT_K, VARIABLES_COUNT, clauses_count);
+      sat = generate_k_sat(SAT_K, VARIABLES_COUNT, clauses_count);
 
       for (j = 0; j < VARIABLES_COUNT; j++) {
         assignments[j] = -1;
       }
 
-      clock_t start = clock();
-      bool result = dpll(sat);
-      clock_t end = clock();
-      total_time += (double)(end - start) / CLOCKS_PER_SEC;
+      start = clock();
+      result = dpll(sat);
+      end = clock();
+      total_time += (float)(end - start) / CLOCKS_PER_SEC;
 
       if (result) {
         sat_count++;
@@ -310,7 +337,7 @@ void compute_phase_transition() {
       destroy_sat(sat);
     }
 
-    satisfiable[step] = (double)sat_count / NUM_INSTANCES * 100.0;
+    satisfiable[step] = (float)((float)sat_count / NUM_INSTANCES * 100.0);
     complexity[step] = total_time / NUM_INSTANCES;
 
     if (complexity[step] > max_complexity) {
@@ -322,60 +349,65 @@ void compute_phase_transition() {
   }
 }
 
-void draw_grid(double x_max, double y_max) {
-  glColor3f(0.3, 0.3, 0.3);
+void draw_grid(float x_max, float y_max) {
+  float x, y;
+  glColor3f(0.3f, 0.3f, 0.3f);
   glBegin(GL_LINES);
-  for (double x = 0.0; x <= x_max; x += x_max / 10.0) {
+  for (x = 0.0; x <= x_max; x += (float)(x_max / 10.0)) {
     glVertex2f(x, 0.0);
     glVertex2f(x, y_max);
   }
-  for (double y = 0.0; y <= y_max; y += y_max / 10.0) {
+  for (y = 0.0; y <= y_max; y += (float)(y_max / 10.0)) {
     glVertex2f(0.0, y);
     glVertex2f(x_max, y);
   }
   glEnd();
 }
 
-void draw_axis_labels(double x_max, double y_max) {
-  glColor3f(1.0, 1.0, 1.0);
+void draw_axis_labels(float x_max, float y_max) {
   char label[10];
+  int i;
+  char *c;
+  glColor3f(1.0, 1.0, 1.0);
 
-  for (int i = 0; i <= 10; i++) {
-    sprintf(label, "%.1f", i * x_max / 10.0);
-    glRasterPos2f(i * x_max / 10.0, -0.05 * y_max);
-    for (char *c = label; *c != '\0'; c++) {
+  for (i = 0; i <= 10; i++) {
+    sprintf(label, "%.1f", (float)i * x_max / 10.0);
+    glRasterPos2f((float)((float)i * x_max / 10.0), (float)-0.05 * y_max);
+    for (c = label; *c != '\0'; c++) {
       glutBitmapCharacter(GLUT_BITMAP_HELVETICA_12, *c);
     }
   }
 
-  for (int i = 0; i <= 10; i++) {
+  for (i = 0; i <= 10; i++) {
     sprintf(label, "%d", i * (int)(y_max / 10.0));
-    glRasterPos2f(-0.05 * x_max, i * y_max / 10.0);
-    for (char *c = label; *c != '\0'; c++) {
+    glRasterPos2f((float)(-0.05 * x_max), (float)((float)i * y_max / 10.0));
+    for (c = label; *c != '\0'; c++) {
       glutBitmapCharacter(GLUT_BITMAP_HELVETICA_12, *c);
     }
   }
 }
 
-void draw_graph(double *x_values, double *y_values, int count, double y_scale,
-                float r, float g, float b, const char *label, double x_legend,
-                double y_legend) {
+void draw_graph(float *x_values, float *y_values, int count, float y_scale,
+                float r, float g, float b, const char *label, float x_legend,
+                float y_legend) {
+  int i;
+  const char *c;
   glColor3f(r, g, b);
   glBegin(GL_LINE_STRIP);
-  for (int i = 0; i < count; i++) {
+  for (i = 0; i < count; i++) {
     glVertex2f(x_values[i], y_values[i] / y_scale);
   }
   glEnd();
 
   glRasterPos2f(x_legend, y_legend);
-  for (const char *c = label; *c != '\0'; c++) {
+  for (c = label; *c != '\0'; c++) {
     glutBitmapCharacter(GLUT_BITMAP_8_BY_13, *c);
   }
 }
 
-void render() {
-  double x_max = 10.0;
-  double y_max = 100.0;
+void render(void) {
+  float x_max = 10.0;
+  float y_max = 100.0;
 
   glClear(GL_COLOR_BUFFER_BIT);
 
