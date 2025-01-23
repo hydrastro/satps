@@ -42,6 +42,12 @@ make
 ![Visualization of the resulting plot](./result.png)
 
 Note: the parameters of the program are hardcoded
+```C
+#define VARIABLES_COUNT 50
+#define SAT_K 3
+#define MAX_CLAUSES 500
+#define ALPHA_STEPS 100
+#define NUM_INSTANCES 100
 ```
 
 ## Contributing
